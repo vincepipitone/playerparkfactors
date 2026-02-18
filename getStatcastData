@@ -1,0 +1,309 @@
+pip install pybaseball pygam pandas numpy scikit-learn
+
+from pybaseball import statcast
+
+# Pull multi-season data (example)
+df = statcast(start_dt="2023-03-01", end_dt="2025-11-30")
+
+# Keep balls in play only
+df = df[df["type"] == "X"]  # contact events
+
+# Calculate spray_angle given Petti's equation
+import numpy as np
+
+x = df["hc_x"].to_numpy(dtype=float)
+y = df["hc_y"].to_numpy(dtype=float)
+
+df["spray_angle"] = np.round(
+    np.degrees(
+        np.arctan2(
+            x - 125.42,
+            198.27 - y
+        )
+    ) * 0.75,
+    1
+)
+
+df = df[~df["game_type"].isin(["E", "S"])]
+
+trimmed_statcast = df[
+    [
+        "game_pk",
+        "game_date",
+        "batter",
+        "pitcher",
+        "events",
+        "des",
+        "stand",
+        "p_throws",
+        "home_team",
+        "away_team",
+        "hit_location",
+        "bb_type",
+        "game_year",
+        "launch_speed",
+        "launch_angle",
+        "hc_x",
+        "hc_y",
+        "spray_angle",
+        "estimated_ba_using_speedangle",
+        "estimated_woba_using_speedangle"
+    ]
+].copy()
+
+import time
+import requests
+import pandas as pd
+
+# 1) unique game_pks from trimmed_statcast
+game_pks = (
+    trimmed_statcast["game_pk"]
+    .dropna()
+    .astype(int)
+    .unique()
+)
+
+# 2) lookup venue for each game_pk -> build `venues` DF
+rows = []
+for i, game_pk in enumerate(game_pks, start=1):
+    url = f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+    stadium = None
+
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        stadium = data.get("gameData", {}).get("venue", {}).get("name", None)
+    except Exception:
+        stadium = None
+
+    rows.append({"game_pk": int(game_pk), "stadium": stadium})
+
+    # be polite to the API
+    time.sleep(0.15)
+
+    if i % 500 == 0:
+        print(f"Processed {i}/{len(game_pks)} games")
+
+venues = pd.DataFrame(rows, columns=["game_pk", "stadium"])
+
+print(venues.head())
+print("Missing stadium rate:", venues["stadium"].isna().mean())
+
+trimmed_statcast = trimmed_statcast.merge(
+    venues,
+    on="game_pk",
+    how="left"
+)
+
+stadium_counts = (
+    trimmed_statcast[["game_pk", "stadium"]]
+    .drop_duplicates(subset="game_pk")   # one row per game
+    .groupby("stadium", dropna=False)
+    .size()
+    .reset_index(name="game_count")
+    .sort_values("game_count", ascending=False)
+)
+
+stadium_counts
+
+import numpy as np
+import pandas as pd
+
+# ----------------------------
+# Stadium cleanup rules
+# ----------------------------
+DROP_STADIUMS = {
+    "Rickwood Field",
+    "Muncy Bank Ballpark",
+    "Bristol Motor Speedway",
+    "Gocheok Sky Dome",
+    "Journey Bank Ballpark",
+    "Tokyo Dome",
+    "Estadio Alfredo Harp Helu",
+    "London Stadium",
+    "Oakland Coliseum",            
+    "Tropicana Field",           
+}
+
+RECODE_STADIUMS = {
+    "Minute Maid Park": "Daikin Park",
+    "Guaranteed Rate Field": "Rate Field",
+}
+
+# ----------------------------
+# 0) Optional: snapshot counts before
+# ----------------------------
+games_before = trimmed_statcast["game_pk"].nunique()
+
+# ----------------------------
+# 1) Recode stadium names (do this BEFORE dropping)
+# ----------------------------
+trimmed_statcast["stadium"] = trimmed_statcast["stadium"].replace(RECODE_STADIUMS)
+
+# ----------------------------
+# 2) Drop unwanted stadium games (game-level drop)
+#    - keep NA stadiums (for troubleshooting) by NOT filtering them out
+# ----------------------------
+# Identify game_pks to drop based on stadium name
+drop_game_pks = (
+    trimmed_statcast.loc[trimmed_statcast["stadium"].isin(DROP_STADIUMS), "game_pk"]
+    .dropna()
+    .unique()
+)
+
+# Filter out those games
+trimmed_statcast = trimmed_statcast[~trimmed_statcast["game_pk"].isin(drop_game_pks)].copy()
+
+# ----------------------------
+# 3) Quick QA
+# ----------------------------
+games_after = trimmed_statcast["game_pk"].nunique()
+print("Unique games before:", games_before)
+print("Unique games after :", games_after)
+print("Dropped games      :", games_before - games_after)
+
+# Confirm recodes took
+print("\nStadium recode check:")
+print(trimmed_statcast["stadium"].isin(RECODE_STADIUMS.keys()).sum(), "rows still with OLD names (should be 0)")
+
+# Confirm drops took (should be 0)
+print("\nDropped stadiums still present (should be 0):")
+still_present = trimmed_statcast.loc[trimmed_statcast["stadium"].isin(DROP_STADIUMS), "stadium"].unique()
+print(still_present)
+
+# If you want a list of dropped game_pks to inspect later:
+dropped_games_df = pd.DataFrame({"game_pk": drop_game_pks})
+print("\nExample dropped game_pks:", dropped_games_df.head().to_string(index=False))
+
+import time
+import numpy as np
+import requests
+import re
+import pandas as pd
+
+# --------------------------------------------------
+# 1) All unique game_pks
+# --------------------------------------------------
+all_game_pks = (
+    trimmed_statcast["game_pk"]
+    .dropna()
+    .astype(int)
+    .unique()
+)
+
+print("Total games:", len(all_game_pks))
+
+
+# --------------------------------------------------
+# 2) Temperature fetch function
+# --------------------------------------------------
+def get_first_pitch_temp(game_pk, timeout=20):
+    url = f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+
+    r = requests.get(url, timeout=timeout)
+    r.raise_for_status()
+    data = r.json()
+
+    temp_raw = data.get("gameData", {}).get("weather", {}).get("temp", None)
+
+    temp_f = np.nan
+    if temp_raw is not None:
+        match = re.search(r"(-?\d+(?:\.\d+)?)", str(temp_raw))
+        if match:
+            temp_f = float(match.group(1))
+
+    return temp_f
+
+
+# --------------------------------------------------
+# 3) Loop through all games
+# --------------------------------------------------
+rows = []
+
+for i, gp in enumerate(all_game_pks, start=1):
+    try:
+        temp = get_first_pitch_temp(gp)
+        rows.append({"game_pk": gp, "temp_f": temp})
+    except Exception:
+        rows.append({"game_pk": gp, "temp_f": np.nan})
+
+    # be polite to API
+    time.sleep(0.12)
+
+    if i % 250 == 0:
+        print(f"Processed {i}/{len(all_game_pks)} games")
+
+temps_all = pd.DataFrame(rows)
+
+print("\nDone.")
+print("Missing rate:", temps_all["temp_f"].isna().mean())
+print(temps_all.head())
+
+trimmed_statcast = trimmed_statcast.merge(
+    temps_all,
+    on="game_pk",
+    how="left"
+)
+
+import time
+import requests
+import pandas as pd
+import numpy as np
+
+# -----------------------------------------
+# 1) Get unique game_pks
+# -----------------------------------------
+all_game_pks = (
+    trimmed_statcast["game_pk"]
+    .dropna()
+    .astype(int)
+    .unique()
+)
+
+print("Total games:", len(all_game_pks))
+
+
+# -----------------------------------------
+# 2) Fetch condition
+# -----------------------------------------
+rows = []
+
+for i, gp in enumerate(all_game_pks, start=1):
+    url = f"https://statsapi.mlb.com/api/v1.1/game/{gp}/feed/live"
+
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+
+        condition = data.get("gameData", {}).get("weather", {}).get("condition", None)
+
+        rows.append({
+            "game_pk": gp,
+            "condition": condition
+        })
+
+    except Exception:
+        rows.append({
+            "game_pk": gp,
+            "condition": None
+        })
+
+    # Be polite to API
+    time.sleep(0.12)
+
+    if i % 250 == 0:
+        print(f"Processed {i}/{len(all_game_pks)} games")
+
+conditions_df = pd.DataFrame(rows)
+
+print("\nDone.")
+print("Missing rate:", conditions_df["condition"].isna().mean())
+print(conditions_df.head())
+
+trimmed_statcast = trimmed_statcast.merge(
+    conditions_df,
+    on="game_pk",
+    how="left"
+)
