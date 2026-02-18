@@ -1,5 +1,11 @@
 pip install pybaseball pygam pandas numpy scikit-learn
 
+import re
+import time
+
+import numpy as np
+import pandas as pd
+import requests
 from pybaseball import statcast
 
 # Pull multi-season data (example)
@@ -9,7 +15,6 @@ df = statcast(start_dt="2023-03-01", end_dt="2025-11-30")
 df = df[df["type"] == "X"]  # contact events
 
 # Calculate spray_angle given Petti's equation
-import numpy as np
 
 x = df["hc_x"].to_numpy(dtype=float)
 y = df["hc_y"].to_numpy(dtype=float)
@@ -50,10 +55,6 @@ trimmed_statcast = df[
         "estimated_woba_using_speedangle"
     ]
 ].copy()
-
-import time
-import requests
-import pandas as pd
 
 # 1) unique game_pks from trimmed_statcast
 game_pks = (
@@ -106,9 +107,6 @@ stadium_counts = (
 )
 
 stadium_counts
-
-import numpy as np
-import pandas as pd
 
 # ----------------------------
 # Stadium cleanup rules
@@ -176,12 +174,6 @@ print(still_present)
 dropped_games_df = pd.DataFrame({"game_pk": drop_game_pks})
 print("\nExample dropped game_pks:", dropped_games_df.head().to_string(index=False))
 
-import time
-import numpy as np
-import requests
-import re
-import pandas as pd
-
 # --------------------------------------------------
 # 1) All unique game_pks
 # --------------------------------------------------
@@ -245,11 +237,6 @@ trimmed_statcast = trimmed_statcast.merge(
     on="game_pk",
     how="left"
 )
-
-import time
-import requests
-import pandas as pd
-import numpy as np
 
 # -----------------------------------------
 # 1) Get unique game_pks
