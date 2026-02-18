@@ -1,6 +1,3 @@
-# ============================================================
-# Imports (consolidated at top — nothing else changed)
-# ============================================================
 import time
 import re
 import requests
@@ -11,11 +8,6 @@ import numpy as np
 import pandas as pd
 
 from pybaseball import statcast
-from pygam import LinearGAM  # if used elsewhere
-from sklearn.linear_model import BayesianRidge
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from xgboost import XGBRegressor
-
 
 # ============================================================
 # Original Code (unchanged)
@@ -27,7 +19,7 @@ df = statcast(start_dt="2023-03-01", end_dt="2025-11-30")
 # Keep balls in play only
 df = df[df["type"] == "X"]  # contact events
 
-# Calculate spray_angle given Petti's equation
+# Calculate spray_angle using Petti's equation
 x = df["hc_x"].to_numpy(dtype=float)
 y = df["hc_y"].to_numpy(dtype=float)
 
