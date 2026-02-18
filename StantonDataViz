@@ -1,0 +1,142 @@
+# Given dataframe containing last 3 years of Statcast BBEs
+# Create Stanton dataframe
+stanton_df = df.loc[df["batter"] == 519317]
+
+import matplotlib.pyplot as plt
+
+# ---------------------------
+# 1) Filter: 2025 hits only
+# ---------------------------
+s = stanton_df.copy()
+
+# ensure datetime
+s["game_date"] = pd.to_datetime(s["game_date"], errors="coerce")
+
+STANTON_2025 = s[
+    (s["game_date"].dt.year == 2025) &
+    (s["events"].isin(["single", "double", "triple", "home_run"])) &
+    s["hc_x"].notna() & s["hc_y"].notna()
+].copy()
+
+print("Rows:", len(STANTON_2025))
+print(STANTON_2025["events"].value_counts())
+
+# ---------------------------
+# 2) Plot: hc_x / hc_y spray chart
+# ---------------------------
+event_style = {
+    "single":   {"label": "SINGLE"},
+    "double":   {"label": "DOUBLE"},
+    "triple":   {"label": "TRIPLE"},
+    "home_run": {"label": "HOME RUN"},
+}
+
+plt.figure(figsize=(7.5, 6.5))
+
+for ev, meta in event_style.items():
+    dd = STANTON_2025[STANTON_2025["events"] == ev]
+    if dd.empty:
+        continue
+
+    plt.scatter(
+        dd["hc_x"], dd["hc_y"],
+        s=70,
+        alpha=0.9,
+        label=meta["label"],
+        edgecolors="black",
+        linewidths=0.5
+    )
+
+plt.gca().invert_yaxis()  # Savant-style orientation
+plt.title("Giancarlo Stanton — 2025 Hits Spray (hc_x vs hc_y)")
+plt.xlabel("hc_x")
+plt.ylabel("hc_y")
+plt.legend(loc="upper right")
+plt.grid(alpha=0.2)
+plt.show()
+
+# ---------------------------
+# 3) Spray-angle sanity checks
+# ---------------------------
+if "spray_angle" not in STANTON_2025.columns:
+    raise ValueError("spray_angle not found in STANTON_2025. Compute it first on stanton_df.")
+
+print(STANTON_2025["spray_angle"].describe())
+
+# monotonic relationship check (hc_x should correlate strongly with spray_angle)
+corr = STANTON_2025[["hc_x", "spray_angle"]].corr().iloc[0, 1]
+print("corr(hc_x, spray_angle):", corr)
+
+# visualize: hc_x -> spray_angle
+plt.figure(figsize=(7, 3.8))
+plt.scatter(STANTON_2025["hc_x"], STANTON_2025["spray_angle"], s=25, alpha=0.5)
+plt.title("hc_x vs spray_angle (Stanton 2025 hits)")
+plt.xlabel("hc_x")
+plt.ylabel("spray_angle")
+plt.grid(alpha=0.2)
+plt.show()
+
+# Visualize using spray_angle, rather than hc_x
+
+# ---------------------------
+# 1) Filter: 2025 hits only
+# ---------------------------
+s = stanton_df.copy()
+s["game_date"] = pd.to_datetime(s["game_date"], errors="coerce")
+
+STANTON_2025 = s[
+    (s["game_date"].dt.year == 2025) &
+    (s["events"].isin(["single", "double", "triple", "home_run"])) &
+    s["hc_x"].notna() & s["hc_y"].notna()
+].copy()
+
+# ---------------------------
+# 2) Compute radial distance from home plate
+# ---------------------------
+HOME_X = 125.42
+HOME_Y = 198.27
+
+dx = STANTON_2025["hc_x"] - HOME_X
+dy = HOME_Y - STANTON_2025["hc_y"]
+
+STANTON_2025["radius"] = np.sqrt(dx**2 + dy**2)
+
+# Convert spray_angle to radians for polar plotting
+STANTON_2025["angle_rad"] = np.radians(STANTON_2025["spray_angle"] / 0.75)
+# divide by 0.75 if you scaled earlier
+
+# ---------------------------
+# 3) Polar Spray Plot
+# ---------------------------
+event_style = {
+    "single":   {"label": "SINGLE"},
+    "double":   {"label": "DOUBLE"},
+    "triple":   {"label": "TRIPLE"},
+    "home_run": {"label": "HOME RUN"},
+}
+
+fig = plt.figure(figsize=(8, 8))
+ax = fig.add_subplot(111, projection='polar')
+
+for ev, meta in event_style.items():
+    dd = STANTON_2025[STANTON_2025["events"] == ev]
+    if dd.empty:
+        continue
+
+    ax.scatter(
+        dd["angle_rad"],
+        dd["radius"],
+        s=70,
+        alpha=0.9,
+        label=meta["label"],
+        edgecolors="black",
+        linewidths=0.5
+    )
+
+ax.set_theta_zero_location("N")   # 0° = straight up (CF)
+ax.set_theta_direction(-1)        # match baseball left/right orientation
+
+ax.set_title("Giancarlo Stanton — 2025 Hits Spray (Polar / Spray Angle View)")
+ax.legend(loc="upper right")
+
+plt.show()
