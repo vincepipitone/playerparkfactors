@@ -1,6 +1,25 @@
-pip install pybaseball pygam pandas numpy scikit-learn
+# ============================================================
+# Imports (consolidated at top — nothing else changed)
+# ============================================================
+import time
+import re
+import requests
+import base64
+import gzip
+import json
+import numpy as np
+import pandas as pd
 
 from pybaseball import statcast
+from pygam import LinearGAM  # if used elsewhere
+from sklearn.linear_model import BayesianRidge
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from xgboost import XGBRegressor
+
+
+# ============================================================
+# Original Code (unchanged)
+# ============================================================
 
 # Pull multi-season data (example)
 df = statcast(start_dt="2023-03-01", end_dt="2025-11-30")
@@ -9,8 +28,6 @@ df = statcast(start_dt="2023-03-01", end_dt="2025-11-30")
 df = df[df["type"] == "X"]  # contact events
 
 # Calculate spray_angle given Petti's equation
-import numpy as np
-
 x = df["hc_x"].to_numpy(dtype=float)
 y = df["hc_y"].to_numpy(dtype=float)
 
@@ -50,10 +67,6 @@ trimmed_statcast = df[
         "estimated_woba_using_speedangle"
     ]
 ].copy()
-
-import time
-import requests
-import pandas as pd
 
 # 1) unique game_pks from trimmed_statcast
 game_pks = (
@@ -107,9 +120,6 @@ stadium_counts = (
 
 stadium_counts
 
-import numpy as np
-import pandas as pd
-
 # ----------------------------
 # Stadium cleanup rules
 # ----------------------------
@@ -143,16 +153,13 @@ trimmed_statcast["stadium"] = trimmed_statcast["stadium"].replace(RECODE_STADIUM
 
 # ----------------------------
 # 2) Drop unwanted stadium games (game-level drop)
-#    - keep NA stadiums (for troubleshooting) by NOT filtering them out
 # ----------------------------
-# Identify game_pks to drop based on stadium name
 drop_game_pks = (
     trimmed_statcast.loc[trimmed_statcast["stadium"].isin(DROP_STADIUMS), "game_pk"]
     .dropna()
     .unique()
 )
 
-# Filter out those games
 trimmed_statcast = trimmed_statcast[~trimmed_statcast["game_pk"].isin(drop_game_pks)].copy()
 
 # ----------------------------
@@ -163,27 +170,18 @@ print("Unique games before:", games_before)
 print("Unique games after :", games_after)
 print("Dropped games      :", games_before - games_after)
 
-# Confirm recodes took
 print("\nStadium recode check:")
 print(trimmed_statcast["stadium"].isin(RECODE_STADIUMS.keys()).sum(), "rows still with OLD names (should be 0)")
 
-# Confirm drops took (should be 0)
 print("\nDropped stadiums still present (should be 0):")
 still_present = trimmed_statcast.loc[trimmed_statcast["stadium"].isin(DROP_STADIUMS), "stadium"].unique()
 print(still_present)
 
-# If you want a list of dropped game_pks to inspect later:
 dropped_games_df = pd.DataFrame({"game_pk": drop_game_pks})
 print("\nExample dropped game_pks:", dropped_games_df.head().to_string(index=False))
 
-import time
-import numpy as np
-import requests
-import re
-import pandas as pd
-
 # --------------------------------------------------
-# 1) All unique game_pks
+# Temperature fetch
 # --------------------------------------------------
 all_game_pks = (
     trimmed_statcast["game_pk"]
@@ -195,9 +193,6 @@ all_game_pks = (
 print("Total games:", len(all_game_pks))
 
 
-# --------------------------------------------------
-# 2) Temperature fetch function
-# --------------------------------------------------
 def get_first_pitch_temp(game_pk, timeout=20):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
 
@@ -216,9 +211,6 @@ def get_first_pitch_temp(game_pk, timeout=20):
     return temp_f
 
 
-# --------------------------------------------------
-# 3) Loop through all games
-# --------------------------------------------------
 rows = []
 
 for i, gp in enumerate(all_game_pks, start=1):
@@ -228,7 +220,6 @@ for i, gp in enumerate(all_game_pks, start=1):
     except Exception:
         rows.append({"game_pk": gp, "temp_f": np.nan})
 
-    # be polite to API
     time.sleep(0.12)
 
     if i % 250 == 0:
@@ -246,13 +237,8 @@ trimmed_statcast = trimmed_statcast.merge(
     how="left"
 )
 
-import time
-import requests
-import pandas as pd
-import numpy as np
-
 # -----------------------------------------
-# 1) Get unique game_pks
+# Condition fetch
 # -----------------------------------------
 all_game_pks = (
     trimmed_statcast["game_pk"]
@@ -263,10 +249,6 @@ all_game_pks = (
 
 print("Total games:", len(all_game_pks))
 
-
-# -----------------------------------------
-# 2) Fetch condition
-# -----------------------------------------
 rows = []
 
 for i, gp in enumerate(all_game_pks, start=1):
@@ -290,7 +272,6 @@ for i, gp in enumerate(all_game_pks, start=1):
             "condition": None
         })
 
-    # Be polite to API
     time.sleep(0.12)
 
     if i % 250 == 0:
